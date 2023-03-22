@@ -1,6 +1,7 @@
 # web_yolov7
 Instance segmentation on the web using YOLOv7
 
+![web screen](webyolov7_inst.png)
 
 ## how to run
 ```
