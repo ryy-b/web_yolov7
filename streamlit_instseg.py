@@ -1,40 +1,40 @@
-from glob import glob
 import sys
-sys.path.append("/workspaces/Web_InstSeg/yolov7/")
-for p in glob("/workspaces/Web_InstSeg/yolov7/*"):
+from glob import glob
+sys.path.append("/workspaces/web_yolov7/yolov7/")
+for p in glob("/workspaces/web_yolov7/yolov7/*"):
     sys.path.append(p)
 
-import matplotlib.pyplot as plt
-import torch
+import io
 import cv2
 import yaml
-from torchvision import transforms
+import torch
+import random
+import tempfile
 import numpy as np
+from PIL import Image
+import streamlit as st
+import matplotlib.pyplot as plt
+from torchvision import transforms
+from memory_profiler import profile
+import warnings;warnings.simplefilter('ignore')
 
 from yolov7.utils.datasets import letterbox
 from yolov7.utils.general import non_max_suppression_mask_conf
-
-from yolov7.detectron2.modeling.poolers import ROIPooler
 from yolov7.detectron2.structures import Boxes
-from yolov7.detectron2.utils.memory import retry_if_cuda_oom
+from yolov7.detectron2.modeling.poolers import ROIPooler
 from yolov7.detectron2.layers import paste_masks_in_image
-import warnings;warnings.simplefilter('ignore')
-import streamlit as st
-from memory_profiler import profile
-from PIL import Image
-import io
-import tempfile
+from yolov7.detectron2.utils.memory import retry_if_cuda_oom
 
 
-def inference(image_path):
+def inference(image_path, model):
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     with open('./yolov7/data/hyp.scratch.mask.yaml') as f:
         hyp = yaml.load(f, Loader=yaml.FullLoader)
         
-    weights = torch.load('./yolov7/yolov7-mask.pt')
-    model = weights['model'].to(device).float().eval()
+    # weights = torch.load('./yolov7/yolov7-mask.pt')
+    # model = weights['model'].to(device).float().eval()
 
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(uploaded_file.read())
@@ -48,7 +48,7 @@ def inference(image_path):
     image = letterbox(image, 640, stride=64, auto=True)[0]
     image = transforms.ToTensor()(image).float()
     image = image.unsqueeze(0).to(device)
-
+    model.eval()
     output = model(image)
 
     return output, image, model, hyp
@@ -66,7 +66,6 @@ def show_result(output, image, model, hyp):
 
     output, output_mask, output_mask_score, output_ac, output_ab = non_max_suppression_mask_conf(inf_out, attn, bases, pooler, hyp, conf_thres=0.25, iou_thres=0.65, merge=False, mask_iou=None)
     pred, pred_masks = output[0], output_mask[0]
-    base = bases[0]
     bboxes = Boxes(pred[:, :4])
     original_pred_masks = pred_masks.view(-1, hyp['mask_resolution'], hyp['mask_resolution'])
     pred_masks = retry_if_cuda_oom(paste_masks_in_image)( original_pred_masks, bboxes, (height, width), threshold=0.5)
@@ -90,32 +89,82 @@ def show_result(output, image, model, hyp):
 
         # フォントの種類とサイズ
         fontFace = cv2.FONT_HERSHEY_SIMPLEX
-        fontScale = 0.5
+        fontScale = 0.7
 
         # アンチエイリアシングを有効にする
         thickness = 1
         lineType = cv2.LINE_AA
 
         pnimg = cv2.putText(pnimg, text, (bbox[0], bbox[1]), fontFace, fontScale, color, thickness, lineType)
-    
-    pnimg = cv2.resize(pnimg, (pnimg.shape[1] * 2, pnimg.shape[0] * 2))
+
+    pnimg = cv2.resize(pnimg, (pnimg.shape[1] * 4, pnimg.shape[0] * 4))
 
     return pnimg
 
 
+
+# class nameをグリッド状に表示
+def display_class_names_in_grid(class_names):
+
+    st.markdown(f"**:blue[Object List that YOLOv7 can recognize ({len(class_names)} classes)]**")
+
+    list_items = ""
+    for c in class_names:
+        list_items += f"<div>{c}</div>"
+
+    st.markdown(f"""
+    <style>
+    .wrapper {{
+        display: grid;
+        grid-template-columns: repeat(12, 120px);
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        padding: 10px;
+    }}
+    .wrapper div {{
+        border: 1px solid black;
+        padding: 10px;
+        background-color: white;
+        text-align: center;
+    }}
+    </style>
+
+    <div class="wrapper">
+        {list_items}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+
 # ページのレイアウトを調整
 st.set_page_config(layout="wide")
-# Streamlitアプリケーションを定義する
+
 st.title('YOLOv7 Instance Segmentation')
-uploaded_file = st.file_uploader('Choose an image', type=['jpg', 'jpeg', 'png'])
+uploaded_files = st.file_uploader('Choose some images!', type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
-if uploaded_file is not None:
-    output, image, model, hyp = inference(uploaded_file)
-    
-    names = model.names
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+weights = torch.load('./yolov7/yolov7-mask.pt')
+model = weights['model'].to(device).float().eval()
+names = model.names
+display_class_names_in_grid(names)
 
-    st.write("<h1>'Objects List that Yolov7 can recognize is showed below.'</h1>", unsafe_allow_html=True)
-    st.write(names, unsafe_allow_html=True)
+# # 2つの列にページを分割
+left_column, right_column = st.columns(2)
 
-    result_image = show_result(output, image, model, hyp)
-    st.image(result_image, channels='RGB')
+if uploaded_files is not None:
+    input_images = []
+    results = []
+    for i, uploaded_file in enumerate(uploaded_files):
+
+        output, image, model, hyp = inference(uploaded_file, model)
+        result_image = show_result(output, image, model, hyp)
+        results.append(result_image)
+        image = Image.open(uploaded_file)
+        input_images.append(image)
+
+    # 結果を表示
+    for result in results:
+        right_column.image(result, caption='Result Image (MS COCO dataset)', use_column_width=True)
+        
+    # 入力画像を表示
+    for image in input_images:
+        left_column.image(image, caption='Original Image (MS COCO dataset)', use_column_width=True)

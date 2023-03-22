@@ -22,15 +22,15 @@ RUN pip install cloudpickle
 RUN pip install streamlit
 RUN pip install memory-profiler
 
-# Detec
-RUN pip install opencv-python
-RUN pip install mss
-RUN pip install timm
-RUN pip install dataclasses
-RUN pip install ftfy
-RUN pip install regex
-RUN pip install fasttext
-RUN pip install scikit-learn
-RUN pip install lvis
-RUN pip install nltk
-RUN pip install git+https://github.com/openai/CLIP.git
+# # Detec
+# RUN pip install opencv-python
+# RUN pip install mss
+# RUN pip install timm
+# RUN pip install dataclasses
+# RUN pip install ftfy
+# RUN pip install regex
+# RUN pip install fasttext
+# RUN pip install scikit-learn
+# RUN pip install lvis
+# RUN pip install nltk
+# RUN pip install git+https://github.com/openai/CLIP.git
