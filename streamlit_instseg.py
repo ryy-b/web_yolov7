@@ -26,15 +26,14 @@ from yolov7.detectron2.layers import paste_masks_in_image
 from yolov7.detectron2.utils.memory import retry_if_cuda_oom
 
 
+
+# 画像をモデルに入れて、推論させる
 def inference(image_path, model):
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     with open('./yolov7/data/hyp.scratch.mask.yaml') as f:
         hyp = yaml.load(f, Loader=yaml.FullLoader)
-        
-    # weights = torch.load('./yolov7/yolov7-mask.pt')
-    # model = weights['model'].to(device).float().eval()
 
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(uploaded_file.read())
@@ -57,32 +56,49 @@ def inference(image_path, model):
 
 def show_result(output, image, model, hyp):
 
-    inf_out, train_out, attn, mask_iou, bases, sem_output = output['test'], output['bbox_and_cls'], output['attn'], output['mask_iou'], output['bases'], output['sem']
+    inf_out, attn, bases, sem_output = output['test'], output['attn'], output['bases'], output['sem']
+
+    # bases : 物体検出用にエンコードされた、特徴マップ
+    # sem_output : セグメンテーション用にエンコードされた特徴マップ
     bases = torch.cat([bases, sem_output], dim=1)
-    nb, _, height, width = image.shape
+    
+    height = image.shape[2]
+    width = image.shape[3]
     names = model.names
     pooler_scale = model.pooler_scale
+
+    # Region of Interest (関心領域) 物体が写っているであろう領域を切り出す
     pooler = ROIPooler(output_size=hyp['mask_resolution'], scales=(pooler_scale,), sampling_ratio=1, pooler_type='ROIAlignV2', canonical_level=2)
 
-    output, output_mask, output_mask_score, output_ac, output_ab = non_max_suppression_mask_conf(inf_out, attn, bases, pooler, hyp, conf_thres=0.25, iou_thres=0.65, merge=False, mask_iou=None)
+    # 信頼度の高い結果を抽出
+    output, output_mask, _, _, _ = non_max_suppression_mask_conf(inf_out, attn, bases, pooler, hyp, conf_thres=0.25, iou_thres=0.65, merge=False, mask_iou=None)
     pred, pred_masks = output[0], output_mask[0]
     bboxes = Boxes(pred[:, :4])
+
+    # 予測されたマスクを hyp['mask_resolution']×hyp['mask_resolution']のサイズにreshape
     original_pred_masks = pred_masks.view(-1, hyp['mask_resolution'], hyp['mask_resolution'])
-    pred_masks = retry_if_cuda_oom(paste_masks_in_image)( original_pred_masks, bboxes, (height, width), threshold=0.5)
+
+    # 画像にマスクを貼り付ける
+    pred_masks = retry_if_cuda_oom(paste_masks_in_image)(original_pred_masks, bboxes, (height, width), threshold=0.5)
     pred_masks_np = pred_masks.detach().cpu().numpy()
+
+    # pred(tensor) : 5つの列から構成
+    # 0から3列目が座標、4列目が存在確率、5列目が物体のクラス
     pred_cls = pred[:, 5].detach().cpu().numpy()
     pred_conf = pred[:, 4].detach().cpu().numpy()
+
+    # image.shape : (batch_size, channels, height, width)
+    # permute(1, 2, 0)で、(height, width, channels)に変換
     nimg = image[0].permute(1, 2, 0) * 255
     nimg = nimg.cpu().numpy().astype(np.uint8)
-    nimg = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR)
+    nimg = cv2.cvtColor(nimg, cv2.COLOR_RGB2BGR) # OpenCVの仕様上、RGBではなくBGRにする必要がある
     nbboxes = bboxes.tensor.detach().cpu().numpy().astype(np.int)
     pnimg = nimg.copy()
 
     for one_mask, bbox, cls, conf in zip(pred_masks_np, nbboxes, pred_cls, pred_conf):
-        if conf < 0.25:
-            continue
+        if conf < 0.25: continue # 信頼度が低いとき、表示しない
         color = [np.random.randint(255), np.random.randint(255), np.random.randint(255)]
-        pnimg[one_mask] = pnimg[one_mask] * 0.5 + np.array(color, dtype=np.uint8) * 0.5
+        pnimg[one_mask] = pnimg[one_mask] * 0.5 + np.array(color, dtype=np.uint8) * 0.5 # 透明感を出して、見やすくする
         pnimg = cv2.rectangle(pnimg, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, 2)
         cls_name = names[int(cls)]
         text = f"{cls_name} ({conf:.2f})"
@@ -112,6 +128,7 @@ def display_class_names_in_grid(class_names):
     for c in class_names:
         list_items += f"<div>{c}</div>"
 
+    # グリッド上にして、背景をグラデーションにした
     st.markdown(f"""
     <style>
     .wrapper {{
@@ -139,12 +156,17 @@ def display_class_names_in_grid(class_names):
 st.set_page_config(layout="wide")
 
 st.title('YOLOv7 Instance Segmentation')
+
+# 画像ファイルのuploaderを表示
 uploaded_files = st.file_uploader('Choose some images!', type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
+# デバイス設定とモデル読み込み
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 weights = torch.load('./yolov7/yolov7-mask.pt')
 model = weights['model'].to(device).float().eval()
 names = model.names
+
+# 識別可能なクラスをグリッド状に表示
 display_class_names_in_grid(names)
 
 # # 2つの列にページを分割
