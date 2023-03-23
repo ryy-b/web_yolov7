@@ -2,6 +2,7 @@
 Instance segmentation on the web using YOLOv7
 
 ![web screen](webyolov7_inst.png)
+<img src="infer_instseg.png" width="3360">
 
 ## how to run
 ```
